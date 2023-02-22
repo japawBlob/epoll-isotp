@@ -37,9 +37,10 @@ int main()
 		exit(EXIT_FAILURE);
 	}
 	epoll.ep_set[epoll.ep_cnt++] = add_stdin(&epoll);
-    epoll.ep_set[epoll.ep_cnt++] = add_timer(&epoll, 1500);
+	epoll.ep_set[epoll.ep_cnt++] = add_isotp_connection(&epoll);
+    // epoll.ep_set[epoll.ep_cnt++] = add_timer(&epoll, 1500);
     // epoll.ep_set[epoll.ep_cnt++] = add_timer(&epoll, 2000);
-    epoll.ep_set[epoll.ep_cnt++] = add_tcp_connection(&epoll, 12345);
+    // epoll.ep_set[epoll.ep_cnt++] = add_tcp_connection(&epoll, 12345);
 	for (int i = 0; i < epoll.ep_cnt; i++) {
 		if (epoll.ep_set[i] == NULL) {
 			perror("add_...");

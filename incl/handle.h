@@ -16,8 +16,13 @@ int handle_tcp_connection(struct ep_entry *e, struct epoll_instance * epoll);
 struct ep_entry * add_tcp_communication(struct epoll_instance * epoll, int fd);
 int handle_tcp_communication(struct ep_entry *e);
 
+struct ep_entry * add_isotp_connection(struct epoll_instance * epoll);
+int handle_isotp_recv(struct ep_entry *e, struct epoll_instance * epoll);
+int handle_isotp_send(struct ep_entry *e);
+
 struct ep_entry *new_e();
 int add_e(struct epoll_instance * epoll, struct ep_entry *e);
+int add_out(struct epoll_instance * epoll, struct ep_entry *e);
 int del_e(struct epoll_instance * epoll, struct ep_entry *e);
 int handle_all(struct epoll_instance * epoll);
 

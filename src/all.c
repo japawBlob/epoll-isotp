@@ -30,8 +30,22 @@ int add_e(struct epoll_instance * epoll, struct ep_entry *e)
 	return 0;
 }
 
-int del_e(struct epoll_instance * epoll, struct ep_entry *e)
+int add_out(struct epoll_instance * epoll, struct ep_entry *e)
 {
+	struct epoll_event ee;
+	ee.events = EPOLLOUT;
+	ee.data.ptr = e;
+	if (epoll_ctl(epoll->fd, EPOLL_CTL_ADD, e->fd, &ee) == -1) {
+		perror("add_e epoll_ctl");
+		exit(EXIT_FAILURE);
+	}
+	return 0;
+}
+
+int del_e(struct epoll_instance * epoll, struct ep_entry *e)
+{	
+	printf("delete\n");
+
 	struct epoll_event ee = {.events = 0, .data.ptr = e};
 	if (epoll_ctl(epoll->fd, EPOLL_CTL_DEL, e->fd, &ee) == -1) {
 		perror("del_e");
@@ -55,9 +69,11 @@ int handle_all(struct epoll_instance * epoll)
 		perror("epoll_wait");
 		exit(EXIT_FAILURE);
 	}
+	//printf("here\n");
 	for (i = 0; i < n; i++) {
 		struct ep_entry *e = (struct ep_entry *)events[i].data.ptr;
-		if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP) || !(events[i].events & EPOLLIN)) {
+		if ((events[i].events & EPOLLERR) || (events[i].events & EPOLLHUP) || !((events[i].events & (EPOLLIN | EPOLLOUT))) ) {
+			//printf("har-har\n");
 			del_e(epoll, e);
 			continue;
 		}
@@ -73,6 +89,12 @@ int handle_all(struct epoll_instance * epoll)
             break;
         case EWS_EPOLL_TCP_COMMUNICATION:
             handle_tcp_communication(events[i].data.ptr);
+            break;
+		case ESW_EPOLL_ISOTP_RECV:
+            handle_isotp_recv(events[i].data.ptr, epoll);
+            break;
+		case ESW_EPOLL_ISOTP_SEND:
+            handle_isotp_send(events[i].data.ptr);
             break;
 		default:
 			return -1;

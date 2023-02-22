@@ -5,15 +5,22 @@
 #include <sys/types.h>
 // #include <arpa/inet.h>
 #include <fcntl.h>
-#include <string.h>
+#include <libgen.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+
+#include <net/if.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+
+#include <linux/can.h>
+#include <linux/can/isotp.h>
 
 #include "ds.h"
 #include "handle.h"
-#include <linux/can.h>
-#include "isotp.h"
 
 
 
@@ -26,47 +33,36 @@
 #define CAN_MSG_BUFSIZE 		5000
 #define CAN_MAX_MSG_BYTES_CNT		30
 
-struct ep_entry * add_isotp_connection(struct epoll_instance * epoll, short int port)
-{
-    const char * interface = "vcan0";
+#define BUFSIZE 67000 /* size > 66000 kernel buf to test socket API internal checks */
+
+
+struct ep_entry * add_isotp_connection(struct epoll_instance * epoll)
+{	
+	printf("epoll created\n");
+    int s;
     struct sockaddr_can addr;
-    struct ifreq ifr;
-	static struct can_isotp_options opts;
-	static struct can_isotp_fc_options fcopts;
-	static struct can_isotp_ll_options llopts;
-	__u32 force_rx_stmin = 0;
-	extern int optind, opterr, optopt;
-	int s;
+    extern int optind, opterr, optopt;
 
+	addr.can_addr.tp.tx_id = 0x123;
+	addr.can_addr.tp.rx_id = 0x321;
 
-	addr.can_addr.tp.tx_id = CAN_TX_MSG_ID;
-	addr.can_addr.tp.rx_id = CAN_RX_MSG_ID;
-	opts.txpad_content = CAN_TX_PADDING;
-	opts.rxpad_content = CAN_RX_PADDING;
-	opts.flags |= (CAN_ISOTP_TX_PADDING | CAN_ISOTP_RX_PADDING);
-
-	if ((s = socket(PF_CAN, SOCK_DGRAM, CAN_ISOTP)) < 0) {
+    if ((s = socket(PF_CAN, SOCK_DGRAM, CAN_ISOTP)) < 0) {
 		perror("socket");
-		return NULL;
-	}
+		exit(1);
+    }
 
-	CHECK(setsockopt(s, SOL_CAN_ISOTP, CAN_ISOTP_OPTS, &opts, sizeof(opts)));
-	CHECK(setsockopt(s, SOL_CAN_ISOTP, CAN_ISOTP_RECV_FC, &fcopts, sizeof(fcopts)));
+    addr.can_family = AF_CAN;
+    addr.can_ifindex = if_nametoindex("vcan0");
+    if (!addr.can_ifindex) {
+		perror("if_nametoindex");
+		exit(1);
+    }
 
-	if (llopts.tx_dl) {
-		if (setsockopt(s, SOL_CAN_ISOTP, CAN_ISOTP_LL_OPTS, &llopts, sizeof(llopts)) < 0) {
-			perror("link layer sockopt");
-			return NULL;
-		}
-	}
-
-	if (opts.flags & CAN_ISOTP_FORCE_RXSTMIN)
-		setsockopt(s, SOL_CAN_ISOTP, CAN_ISOTP_RX_STMIN, &force_rx_stmin, sizeof(force_rx_stmin));
-
-	addr.can_family = AF_CAN;
-	strcpy(ifr.ifr_name, interface);
-	ioctl(s, SIOCGIFINDEX, &ifr);
-	addr.can_ifindex = ifr.ifr_ifindex;
+    if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		perror("bind");
+		close(s);
+		exit(1);
+    }
 
 	int flags;
 	int ret;
@@ -75,60 +71,73 @@ struct ep_entry * add_isotp_connection(struct epoll_instance * epoll, short int 
 	ret = fcntl(s, F_SETFL, flags | O_NONBLOCK);
 	if (ret == -1) {
 		perror("Make socket O_NONBLOCK");
-		return -1;
+		exit(1);
 	}
-}
-
-int handle_isotp_connection(struct ep_entry *e, struct epoll_instance * epoll)
-{
-    int cfd;
-    if ( (cfd = accept(e->fd, NULL, NULL)) == -1){
-        return -1;
-    }
-    fcntl(cfd, F_SETFL, O_NONBLOCK);
-    epoll->ep_set[epoll->ep_cnt++] = add_tcp_communication(epoll, cfd);
-    return 0;
-}
-
-struct ep_entry * add_isotp_communication(struct epoll_instance * epoll, int fd)
-{
-    struct ep_entry *e;
+	struct ep_entry *e;
     e = new_e();
-    e->type = EWS_EPOLL_TCP_COMMUNICATION;
-    e->fd = fd;
-    e->count = 0;
+    e->type = ESW_EPOLL_ISOTP_RECV;
+    e->fd = s;
     add_e(epoll, e);
     return e;
 }
 
-int handle_isotp_server(struct ep_entry *e)
-{
-    char temp_buffer [SMOL_BUFF_SIZE];
-    memset(temp_buffer, 0, SMOL_BUFF_SIZE);
-    int temp_count = read(e->fd, temp_buffer, SMOL_BUFF_SIZE-1);
-    if(temp_count != -1 && temp_count != 0){
-        memcpy(e->buffer+e->count, temp_buffer, temp_count);
-        e->count += temp_count;
-        char * terminator;
-        while ( ( terminator = strstr (e->buffer, "\n") ) != NULL ) {
-            *terminator = '\0';
-            char ret [10];
-            sprintf(ret, "%lu\n", strlen(e->buffer));
-            write(e->fd, ret, strlen(ret));
-            e->count -= ( strlen(e->buffer) + 1 );
-            memcpy(e->buffer, terminator+1, BUF_SIZE);
-        }
+int handle_isotp_recv(struct ep_entry *e, struct epoll_instance * epoll)
+{	
+	printf("message received\n");
+
+	read(e->fd, e->buffer, BUF_SIZE);
+
+	int s;
+    struct sockaddr_can addr;
+    extern int optind, opterr, optopt;
+
+	addr.can_addr.tp.tx_id = 0x124;
+	addr.can_addr.tp.rx_id = 0x322;
+
+    if ((s = socket(PF_CAN, SOCK_DGRAM, CAN_ISOTP)) < 0) {
+		perror("socket");
+		exit(1);
     }
+
+    addr.can_family = AF_CAN;
+    addr.can_ifindex = if_nametoindex("vcan0");
+    if (!addr.can_ifindex) {
+		perror("if_nametoindex");
+		exit(1);
+    }
+
+    if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		perror("bind");
+		close(s);
+		exit(1);
+    }
+
+	int flags;
+	int ret;
+	if (-1 == (flags = fcntl(s, F_GETFL, 0)))
+		flags = 0;
+	ret = fcntl(s, F_SETFL, flags | O_NONBLOCK);
+	if (ret == -1) {
+		perror("Make socket O_NONBLOCK");
+		exit(1);
+	}
+
+	
+
+	struct ep_entry * write_entry1;
+    write_entry1 = new_e();
+	memcpy(write_entry1->buffer, e->buffer, BUF_SIZE);
+    write_entry1->type = ESW_EPOLL_ISOTP_SEND;
+    write_entry1->fd = s;
+
+	write(s, e->buffer, BUF_SIZE);
+    add_out(epoll, write_entry1);
     return 0;
 }
 
-// int handle_isotp_recv(struct ep_entry *e)
-// {
-//     int blob = CAN_SFF_ID_BITS;
-//     return 0;
-// }
-
-// int handle_isotp_send(struct ep_entry *e)
-// {
-//     return 0;
-// }
+int handle_isotp_send(struct ep_entry *e)
+{
+	// printf("message send\n");
+	write(e->fd, e->buffer, BUF_SIZE);
+    return 0;
+}
