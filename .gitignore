@@ -1,0 +1,5 @@
+builddir/
+*swp
+.idea/
+.vscode/
+update/
